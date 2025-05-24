@@ -1,0 +1,250 @@
+
+
+```{r}
+# load required libraries 
+library(pheatmap) # for heatmap visualization
+library(BiocManager) # for installing Bioconductor packages
+
+library(tidyverse) # for data manipulation and visualization
+
+library(edgeR) # for differential expression analysis
+library(limma) # for linear modeling and differential expression analysis
+library(apeglm) # for shrinkage estimation
+
+library(ashr) # for shrinkage estimation
+
+library(VennDiagram) # for creating Venn diagrams
+
+library(ggplot2) # for data visualization
+
+library(RColorBrewer) # for color palettes
+
+```
+
+```{r}
+# Loading rna and ribo count data
+rna_data <- read.csv('rna_counts.csv', row.names = 1)
+ribo_data <- read.csv('ribo_counts.csv', row.names = 1)
+
+head(rna_data)
+head(ribo_data)
+# Check the dimensions of the data
+dim(rna_data)
+dim(ribo_data)
+
+# define experimental groups
+group_rna = factor(c("Aux","Aux","Aux","noAux","noAux","noAux"))
+group_ribo = factor(c("Aux","Aux","Aux","noAux","noAux","noAux"))
+
+
+# Create DGEList objects
+dge_rna = DGEList(counts = rna_data, group = group_rna)
+dge_ribo = DGEList(counts = ribo_data, group = group_ribo)
+
+
+```
+
+
+```{r}
+
+# Filter lowly expressed genes 
+keep_rna = filterByExpr(dge_rna, group = group_rna)
+keep_ribo = filterByExpr(dge_ribo, group = group_ribo)
+
+
+# Keep only the genes that are expressed in at least 2 samples
+dge_rna = dge_rna[keep_rna, , keep.lib.sizes = FALSE]
+dge_ribo = dge_ribo[keep_ribo, , keep.lib.sizes = FALSE]
+
+dim(dge_rna)
+dim(dge_ribo)
+
+
+# Normalizing the data
+
+dge_rna = calcNormFactors(dge_rna, method = "TMM")
+dge_ribo = calcNormFactors(dge_ribo, method = "TMM")
+
+head(dge_rna)
+
+```
+```{r}
+
+# quality control  
+
+# Plot MDS and save to file 
+png("new_results/MDS_rna.png", width = 800, height = 600)
+plotMDS(dge_rna, col = as.numeric(group_rna), main = "MDS plot for RNA-seq data")
+dev.off()
+# Plot MDS and save to file
+png("new_results/MDS_ribo.png", width = 800, height = 600)
+plotMDS(dge_ribo, col = as.numeric(group_ribo), main = "MDS plot for Ribo-seq data")
+dev.off()
+# logCPM
+logCPM_rna = cpm(dge_rna, log = TRUE)
+logCPM_ribo = cpm(dge_ribo, log = TRUE)
+my_colors <- c("skyblue", "skyblue", "skyblue", "salmon", "salmon", "salmon")
+# Plot logCPM and save to file
+png("new_results/logCPM_rna.png", width = 800, height = 600)
+boxplot(logCPM_rna, main = "Log2 CPM for RNA-seq data", col = my_colors, las = 2)
+dev.off()
+# Plot logCPM and save to file      
+png("new_results/logCPM_ribo.png", width = 800, height = 600)
+boxplot(logCPM_ribo, main = "Log2 CPM for Ribo-seq data", col = my_colors, las = 2)
+dev.off()
+```
+
+
+
+```{r}
+
+# Create a design matrix for the RNA-seq  and Ribo-seq data
+design_rna = model.matrix(~0 + group_rna)
+design_ribo = model.matrix(~0 + group_ribo)
+# Set the column names of the design matrix
+colnames(design_rna) = levels(group_rna)
+colnames(design_ribo) = levels(group_ribo)
+# Estimate dispersion for the RNA-seq and Ribo-seq data
+dge_rna = estimateDisp(dge_rna, design_rna)
+dge_ribo = estimateDisp(dge_ribo, design_ribo)
+
+# plot the mean-dispersion relationship
+png("new_results/mean_dispersion_rna.png", width = 800, height = 600)
+plotBCV(dge_rna, main = "Mean-Dispersion Relationship for RNA-seq data")
+dev.off()
+# plot the mean-dispersion relationship
+png("new_results/mean_dispersion_ribo.png", width = 800, height = 600)
+plotBCV(dge_ribo, main = "Mean-Dispersion Relationship for Ribo-seq data")
+dev.off()
+
+dge_rna
+
+```
+
+
+```{r}
+
+# Fit the model 
+fit_rna = glmQLFit(dge_rna, design_rna)
+fit_ribo = glmQLFit(dge_ribo, design_ribo)
+
+# Perform differential expression analysis
+qlf_rna = glmQLFTest(fit_rna, contrast = c(1, -1))
+qlf_ribo = glmQLFTest(fit_ribo, contrast = c(1, -1))
+# Get the results
+res_rna = topTags(qlf_rna, n = Inf)
+res_ribo = topTags(qlf_ribo, n = Inf)
+# Convert to data frame
+res_rna_df = as.data.frame(res_rna)
+res_ribo_df = as.data.frame(res_ribo)
+
+head(res_rna_df)
+head(res_ribo_df)
+# Add gene names
+res_rna_df$gene = rownames(res_rna_df)
+res_ribo_df$gene = rownames(res_ribo_df)
+
+head(res_rna_df)
+head(res_ribo_df)
+# # Save results to CSV
+write.csv(res_rna_df, file = "new_results/rna_results.csv", row.names = FALSE)
+write.csv(res_ribo_df, file = "new_results/ribo_results.csv", row.names = FALSE)
+
+```
+```{r}
+# Load the results
+res_rna_df = read.csv("new_results/rna_results.csv")
+res_ribo_df = read.csv("new_results/ribo_results.csv")
+# Check the dimensions of the results
+dim(res_rna_df)
+dim(res_ribo_df)
+
+# Check the ones with padj < 0.05
+res_rna_df_sig = res_rna_df[res_rna_df$FDR < 0.05, ]
+res_ribo_df_sig = res_ribo_df[res_ribo_df$FDR < 0.05, ]
+# Check the dimensions of the results
+dim(res_rna_df_sig)
+dim(res_ribo_df_sig)
+# Check the first few rows of the results
+head(res_rna_df_sig)
+head(res_ribo_df_sig)
+# Save the significant results to CSV
+write.csv(res_rna_df_sig, file = "new_results/rna_results_sig.csv", row.names = FALSE)
+write.csv(res_ribo_df_sig, file = "new_results/ribo_results_sig.csv", row.names = FALSE)
+```
+
+```{r}
+# plot the volcano plot
+png("new_results/volcano_rna.png", width = 800, height = 600)
+ggplot(res_rna_df, aes(x = logFC, y = -log10(FDR))) +
+  geom_point(aes(color = FDR < 0.05)) +
+  scale_color_manual(values = c("black", "red")) +
+  theme_minimal() +
+  labs(title = "Volcano plot for RNA-seq data", x = "log2 Fold Change", y = "-log10 FDR") +
+  theme(legend.position = "right")
+dev.off()
+# plot the volcano plot
+png("new_results/volcano_ribo.png", width = 800, height = 600)
+ggplot(res_ribo_df, aes(x = logFC, y = -log10(FDR))) +
+  geom_point(aes(color = FDR < 0.05)) +
+  scale_color_manual(values = c("black", "red")) +
+  theme_minimal() +
+  labs(title = "Volcano plot for Ribo-seq data", x = "log2 Fold Change", y = "-log10 FDR") +
+  theme(legend.position = "right")
+dev.off()
+```
+```{r}
+# plot the MA plot add legend
+png("new_results/MA_rna_legend.png", width = 800, height = 600)
+ggplot(res_rna_df, aes(x = logCPM, y = logFC)) +
+  geom_point(aes(color = FDR < 0.05)) +
+  scale_color_manual(values = c("black", "red")) +
+  theme_minimal() +
+  labs(title = "MA plot for RNA-seq data", x = "log2 CPM", y = "log2 Fold Change") +
+  theme(legend.position = "right")
+dev.off()
+# plot the MA plot add legend
+png("new_results/MA_ribo_legend.png", width = 800, height = 600)
+ggplot(res_ribo_df, aes(x = logCPM, y = logFC)) +
+  geom_point(aes(color = FDR < 0.05)) +
+  scale_color_manual(values = c("black", "red")) +
+  theme_minimal() +
+  labs(title = "MA plot for Ribo-seq data", x = "log2 CPM", y = "log2 Fold Change") +
+  theme(legend.position = "right")
+dev.off()
+
+```
+
+```{r}
+# plot the heatmap
+png("new_results/heatmap_rna.png", width = 800, height = 600)
+pheatmap(logCPM_rna, cluster_rows = TRUE, cluster_cols = TRUE, show_rownames = FALSE,
+         main = "Heatmap of RNA-seq data", fontsize_row = 6, fontsize_col = 6,
+         color = colorRampPalette(brewer.pal(9, "Blues"))(100))
+dev.off()
+# plot the heatmap
+png("new_results/heatmap_ribo.png", width = 800, height = 600)
+pheatmap(logCPM_ribo, cluster_rows = TRUE, cluster_cols = TRUE, show_rownames = FALSE,
+         main = "Heatmap of Ribo-seq data", fontsize_row = 6, fontsize_col = 6,
+         color = colorRampPalette(brewer.pal(9, "Blues"))(100))
+dev.off()
+
+```
+
+
+
+```{r}
+# plot the heatmap of significant genes
+png("new_results/heatmap_rna_sig.png", width = 800, height = 600)
+pheatmap(logCPM_rna[res_rna_df$gene[res_rna_df$FDR < 0.05], ], cluster_rows = TRUE, cluster_cols = TRUE, show_rownames = FALSE,
+         main = "Heatmap of significant RNA-seq data", fontsize_row = 6, fontsize_col = 6,
+         color = colorRampPalette(brewer.pal(9, "Blues"))(100))
+dev.off()
+# plot the heatmap of significant genes
+png("new_results/heatmap_ribo_sig.png", width = 800, height = 600)
+pheatmap(logCPM_ribo[res_ribo_df$gene[res_ribo_df$FDR < 0.05], ], cluster_rows = TRUE, cluster_cols = TRUE, show_rownames = FALSE,
+         main = "Heatmap of significant Ribo-seq data", fontsize_row = 6, fontsize_col = 6,
+         color = colorRampPalette(brewer.pal(9, "Blues"))(100))
+dev.off()
+
+```
