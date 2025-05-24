@@ -1,0 +1,364 @@
+```{r}
+# importing necessary libraries
+library(biomaRt)
+library(org.Ce.eg.db)
+library(clusterProfiler)
+library(tidyverse)
+library(GOSemSim)
+library(enrichplot) 
+
+```
+
+```{r}
+# Load the selected ribo and rna gene names
+ribo_gene_name <- read.csv("selected_ribo.csv", row.names = 1)
+rna_gene_name <- read.csv("selected_rna.csv", row.names = 1)
+
+ribo_gene_name <- rownames(ribo_gene_name)
+rna_gene_name <- rownames(rna_gene_name)
+
+# Convert Ensembl IDs to gene symbols
+ensembl <- useEnsembl(biomart = "ensembl", dataset = "celegans_gene_ensembl", version = 113)
+
+ribo_wormbase_id <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+                        filters = "external_gene_name",
+                        values = ribo_gene_name,
+                        mart = ensembl)
+
+rna_wormbase_id <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+                        filters = "external_gene_name",
+                        values = rna_gene_name,
+                        mart = ensembl)
+
+
+head(ribo_wormbase_id)
+dim(ribo_wormbase_id)
+head(rna_wormbase_id)
+dim(rna_wormbase_id)
+
+# save the ids
+
+write.csv(ribo_wormbase_id, file = "ribo_wormbase_id.csv", row.names = FALSE)
+write.csv(rna_wormbase_id, file = "rna_wormbase_id.csv", row.names = FALSE)
+
+
+```
+
+```{r}
+# Load the wormbase ids
+ribo_wormbase_id <- ribo_wormbase_id$ensembl_gene_id
+rna_wormbase_id <- rna_wormbase_id$ensembl_gene_id
+
+# Convert WORMBASE IDs to ENTREZ IDs using org.Ce.eg.db
+entrez_id_ribo <- mapIds(org.Ce.eg.db, keys = ribo_wormbase_id, column = "ENTREZID", keytype = "WORMBASE", multiVals = "list")
+
+entrez_id_rna <- mapIds(org.Ce.eg.db, keys = rna_wormbase_id, column = "ENTREZID", keytype = "WORMBASE", multiVals = "list")
+
+entrez_id_ribo_df <- data.frame(WB_ID = rep(names(entrez_id_ribo), sapply(entrez_id_ribo, length)),
+                            ENTREZ_ID = unlist(entrez_id_ribo))
+
+entrez_id_rna_df <- data.frame(WB_ID = rep(names(entrez_id_rna), sapply(entrez_id_rna, length)),
+                            ENTREZ_ID = unlist(entrez_id_rna))
+
+head(entrez_id_ribo_df)
+dim(entrez_id_ribo_df)
+head(entrez_id_rna_df)
+
+dim(entrez_id_rna_df)
+
+# save the ids
+write.csv(entrez_id_ribo_df, file = "entrez_id_ribo_df.csv", row.names = FALSE)
+write.csv(entrez_id_rna_df, file = "entrez_id_rna_df.csv", row.names = FALSE)
+
+```
+
+```{r}
+# Load the wormbase ids
+ribo_wormbase_id <- read.csv("ribo_wormbase_id.csv")
+rna_wormbase_id <- read.csv("rna_wormbase_id.csv")
+ribo_entrez_id <- read.csv("entrez_id_ribo_df.csv")
+rna_entrez_id <- read.csv("entrez_id_rna_df.csv")
+
+# renaming the columns
+colnames(ribo_wormbase_id) <- c("WB_ID", "external_gene_name")
+colnames(rna_wormbase_id) <- c("WB_ID", "external_gene_name")
+
+head(ribo_wormbase_id)
+head(ribo_entrez_id)
+dim(ribo_wormbase_id)
+dim(ribo_entrez_id)
+
+#merge the two dataframes
+new_df_ribo <- merge(ribo_wormbase_id, ribo_entrez_id, by = "WB_ID", all.x = TRUE)
+new_df_rna <- merge(rna_wormbase_id, rna_entrez_id, by = "WB_ID", all.x = TRUE)
+head(new_df_ribo)
+head(new_df_rna)
+dim(new_df_ribo)
+dim(new_df_rna)
+# save the ids
+write.csv(new_df_ribo, file = "all_ribo_id.csv", row.names = FALSE)
+write.csv(new_df_rna, file = "all_rna_id.csv", row.names = FALSE)
+```
+
+
+```{r}
+
+setdiff(ribo_gene_name,ribo_wormbase_id$external_gene_name) # check if there are any missing genes in the ribo data
+
+```
+
+```{r}
+# Load the Entrez IDs for ribo and rna
+entrez_id_ribo_df <- read.csv("entrez_id_ribo_df.csv")
+entrez_id_rna_df <- read.csv("entrez_id_rna_df.csv")
+
+
+```{r}
+# Perform GO enrichment analysis for ribo data (Biological Process, Molecular Function, Cellular Component)
+go_enrich_ribo_bp <- enrichGO(gene = entrez_id_ribo_df$ENTREZ_ID,
+                     OrgDb = org.Ce.eg.db,
+                     keyType = "ENTREZID",
+                     ont = "BP",
+                     pAdjustMethod = "BH",
+                     pvalueCutoff = 0.05)
+go_enrich_ribo_mf <- enrichGO(gene = entrez_id_ribo_df$ENTREZ_ID,
+                     OrgDb = org.Ce.eg.db,
+                     keyType = "ENTREZID",
+                     ont = "MF",
+                     pAdjustMethod = "BH",
+                     pvalueCutoff = 0.05)
+go_enrich_ribo_cc <- enrichGO(gene = entrez_id_ribo_df$ENTREZ_ID,
+                     OrgDb = org.Ce.eg.db,
+                     keyType = "ENTREZID",
+                     ont = "CC",
+                     pAdjustMethod = "BH",
+                     pvalueCutoff = 0.05)
+
+
+
+go_enrich_ribo_bp_result <- go_enrich_ribo_bp@result
+go_enrich_ribo_mf_result <- go_enrich_ribo_mf@result
+go_enrich_ribo_cc_result <- go_enrich_ribo_cc@result                  
+
+```
+
+```{r}
+# Perform GO enrichment analysis for rna data (Biological Process, Molecular Function, Cellular Component)
+go_enrich_rna_bp <- enrichGO(gene = entrez_id_rna_df$ENTREZ_ID,
+                     OrgDb = org.Ce.eg.db,
+                     keyType = "ENTREZID",
+                     ont = "BP",
+                     pAdjustMethod = "BH",
+                     pvalueCutoff = 0.05)
+go_enrich_rna_mf <- enrichGO(gene = entrez_id_rna_df$ENTREZ_ID,
+                        OrgDb = org.Ce.eg.db,
+                        keyType = "ENTREZID",
+                        ont = "MF",
+                        pAdjustMethod = "BH",
+                        pvalueCutoff = 0.05)
+go_enrich_rna_cc <- enrichGO(gene = entrez_id_rna_df$ENTREZ_ID,
+                        OrgDb = org.Ce.eg.db,
+                        keyType = "ENTREZID",
+                        ont = "CC",
+                        pAdjustMethod = "BH",
+                        pvalueCutoff = 0.05)
+
+
+go_enrich_rna_bp_result <- go_enrich_rna_bp@result
+go_enrich_rna_mf_result <- go_enrich_rna_mf@result
+go_enrich_rna_cc_result <- go_enrich_rna_cc@result
+```
+
+```{r}
+dim(go_enrich_ribo_bp_result)
+dim(go_enrich_ribo_mf_result)
+dim(go_enrich_ribo_cc_result)
+dim(go_enrich_rna_bp_result)
+dim(go_enrich_rna_mf_result)
+dim(go_enrich_rna_cc_result)
+
+
+```
+
+```{r}
+# Remove NA values from the GO enrichment results
+go_enrich_ribo_bp_result_na <- na.omit(go_enrich_ribo_bp_result)
+go_enrich_ribo_mf_result_na <- na.omit(go_enrich_ribo_mf_result)
+go_enrich_ribo_cc_result_na <- na.omit(go_enrich_ribo_cc_result)
+go_enrich_rna_bp_result_na <- na.omit(go_enrich_rna_bp_result)
+go_enrich_rna_mf_result_na <- na.omit(go_enrich_rna_mf_result)
+go_enrich_rna_cc_result_na <- na.omit(go_enrich_rna_cc_result)
+
+dim(go_enrich_ribo_bp_result_na)
+dim(go_enrich_ribo_mf_result_na)
+dim(go_enrich_ribo_cc_result_na)
+dim(go_enrich_rna_bp_result_na)
+dim(go_enrich_rna_mf_result_na)
+dim(go_enrich_rna_cc_result_na)
+
+```
+```{r}
+# extracting the GO ID's for the terms(Ribo)
+go_terms_ribo_bp <- go_enrich_ribo_bp_result_na$ID
+go_terms_ribo_mf <- go_enrich_ribo_mf_result_na$ID
+go_terms_ribo_cc <- go_enrich_ribo_cc_result_na$ID
+
+# using the ID's to extract the terms data
+go_data_ribo_bp <- godata("org.Ce.eg.db", ont = "BP") 
+go_data_ribo_mf <- godata("org.Ce.eg.db", ont = "MF")
+go_data_ribo_cc <- godata("org.Ce.eg.db", ont = "CC")
+
+#checking for the similarity within the terms 
+sim_matrix_ribo_bp <- mgoSim(go_terms_ribo_bp, go_terms_ribo_bp ,semData = go_data_ribo_bp, measure = "Rel", combine = NULL)
+sim_matrix_ribo_mf <- mgoSim(go_terms_ribo_mf, go_terms_ribo_mf ,semData = go_data_ribo_mf, measure = "Rel", combine = NULL)
+sim_matrix_ribo_cc <- mgoSim(go_terms_ribo_cc, go_terms_ribo_cc ,semData = go_data_ribo_cc, measure = "Rel", combine = NULL)
+
+sim_matrix_ribo_bp_df <- as.data.frame(as.table(sim_matrix_ribo_bp))
+sim_matrix_ribo_mf_df <- as.data.frame(as.table(sim_matrix_ribo_mf))
+sim_matrix_ribo_cc_df <- as.data.frame(as.table(sim_matrix_ribo_cc))
+```
+
+```{r}
+# extracting the GO ID's for the terms(Rna)
+go_terms_rna_bp <- go_enrich_rna_bp_result_na$ID
+go_terms_rna_mf <- go_enrich_rna_mf_result_na$ID
+go_terms_rna_cc <- go_enrich_rna_cc_result_na$ID
+
+# using the ID's to extract the terms data
+go_data_rna_bp <- godata("org.Ce.eg.db", ont = "BP")
+go_data_rna_mf <- godata("org.Ce.eg.db", ont = "MF")
+go_data_rna_cc <- godata("org.Ce.eg.db", ont = "CC")
+#checking for the similarity within the terms 
+sim_matrix_rna_bp <- mgoSim(go_terms_rna_bp, go_terms_rna_bp ,semData = go_data_rna_bp, measure = "Rel", combine = NULL)
+sim_matrix_rna_mf <- mgoSim(go_terms_rna_mf, go_terms_rna_mf ,semData = go_data_rna_mf, measure = "Rel", combine = NULL)
+sim_matrix_rna_cc <- mgoSim(go_terms_rna_cc, go_terms_rna_cc ,semData = go_data_rna_cc, measure = "Rel", combine = NULL)
+
+sim_matrix_rna_bp_df <- as.data.frame(as.table(sim_matrix_rna_bp))
+sim_matrix_rna_mf_df <- as.data.frame(as.table(sim_matrix_rna_mf))
+sim_matrix_rna_cc_df <- as.data.frame(as.table(sim_matrix_rna_cc))
+```
+```{r}
+ # selecting the highly similar terms
+highly_similar_ribo_bp <-  subset(sim_matrix_ribo_bp_df, Freq > 0.95 & Var1 != Var2) 
+highly_similar_ribo_mf <-  subset(sim_matrix_ribo_mf_df, Freq > 0.95 & Var1 != Var2)
+highly_similar_ribo_cc <-  subset(sim_matrix_ribo_cc_df, Freq > 0.95 & Var1 != Var2)
+
+highly_similar_rna_bp <-  subset(sim_matrix_rna_bp_df, Freq > 0.95 & Var1 != Var2)
+highly_similar_rna_mf <-  subset(sim_matrix_rna_mf_df, Freq > 0.95 & Var1 != Var2)
+highly_similar_rna_cc <-  subset(sim_matrix_rna_cc_df, Freq > 0.95 & Var1 != Var2)
+```
+```{r}
+# Removing redundant terms
+keep_ribo_bp <- go_enrich_ribo_bp_result_na %>% arrange(p.adjust) %>%
+  filter(!(ID %in% highly_similar_ribo_bp$Var2))  
+
+keep_ribo_mf <- go_enrich_ribo_mf_result_na %>% arrange(p.adjust) %>%
+    filter(!(ID %in% highly_similar_ribo_mf$Var2))
+keep_ribo_cc <- go_enrich_ribo_cc_result_na %>% arrange(p.adjust) %>%
+    filter(!(ID %in% highly_similar_ribo_cc$Var2))
+
+keep_rna_bp <- go_enrich_rna_bp_result_na %>% arrange(p.adjust) %>%
+  filter(!(ID %in% highly_similar_rna_bp$Var2))
+keep_rna_mf <- go_enrich_rna_mf_result_na %>% arrange(p.adjust) %>%
+    filter(!(ID %in% highly_similar_rna_mf$Var2))
+
+keep_rna_cc <- go_enrich_rna_cc_result_na %>% arrange(p.adjust) %>%
+    filter(!(ID %in% highly_similar_rna_cc$Var2))
+```
+
+
+
+
+
+```{r}
+# Create a new GO enrichment object with filtered terms
+
+go_enrich_ribo_bp_filtered <- go_enrich_ribo_bp
+go_enrich_ribo_mf_filtered <- go_enrich_ribo_mf
+go_enrich_ribo_cc_filtered <- go_enrich_ribo_cc
+go_enrich_rna_bp_filtered <- go_enrich_rna_bp
+go_enrich_rna_mf_filtered <- go_enrich_rna_mf   
+go_enrich_rna_cc_filtered <- go_enrich_rna_cc
+
+go_enrich_ribo_bp_filtered@result <- keep_ribo_bp
+go_enrich_ribo_mf_filtered@result <- keep_ribo_mf
+go_enrich_ribo_cc_filtered@result <- keep_ribo_cc
+go_enrich_rna_bp_filtered@result <- keep_rna_bp
+go_enrich_rna_mf_filtered@result <- keep_rna_mf
+go_enrich_rna_cc_filtered@result <- keep_rna_cc
+
+```
+
+
+```{r}
+# Save the filtered GO enrichment results to CSV files
+write.csv(go_enrich_ribo_bp_filtered@result, file = "go_enrich_ribo_bp_filtered.csv", row.names = FALSE)
+write.csv(go_enrich_ribo_mf_filtered@result, file = "go_enrich_ribo_mf_filtered.csv", row.names = FALSE)
+write.csv(go_enrich_ribo_cc_filtered@result, file = "go_enrich_ribo_cc_filtered.csv", row.names = FALSE)
+write.csv(go_enrich_rna_bp_filtered@result, file = "go_enrich_rna_bp_filtered.csv", row.names = FALSE)
+write.csv(go_enrich_rna_mf_filtered@result, file = "go_enrich_rna_mf_filtered.csv", row.names = FALSE)
+write.csv(go_enrich_rna_cc_filtered@result, file = "go_enrich_rna_cc_filtered.csv", row.names = FALSE)
+```
+
+```{r}
+
+# # count is na
+# go_enrich_ribo_bp_filtered@result$Count[is.na(go_enrich_ribo_bp_filtered@result$Count)] <- 0
+
+head(go_enrich_ribo_bp_filtered@result)
+
+``` 
+
+```{r}
+# Plot the dotplot for the filtered GO enrichment results
+png("go_enrich_ribo_bp_filtered.png", width = 800, height = 600)  
+dotplot(go_enrich_ribo_bp_filtered, showCategory = 10) + ggtitle("Ribo-seq GO Enrichment BP")
+dev.off()
+png("go_enrich_ribo_mf_filtered.png", width = 800, height = 600)
+dotplot(go_enrich_ribo_mf_filtered, showCategory = 10) + ggtitle("Ribo-seq GO Enrichment MF")
+dev.off()
+png("go_enrich_ribo_cc_filtered.png", width = 800, height = 600)
+dotplot(go_enrich_ribo_cc_filtered, showCategory = 10) + ggtitle("Ribo-seq GO Enrichment CC")
+dev.off()
+png("go_enrich_rna_bp_filtered.png", width = 800, height = 600)
+dotplot(go_enrich_rna_bp_filtered, showCategory = 10) + ggtitle("RNA-seq GO Enrichment BP")
+dev.off()
+png("go_enrich_rna_mf_filtered.png", width = 800, height = 600)
+dotplot(go_enrich_rna_mf_filtered, showCategory = 10) + ggtitle("RNA-seq GO Enrichment MF")
+dev.off()
+png("go_enrich_rna_cc_filtered.png", width = 800, height = 600)
+dotplot(go_enrich_rna_cc_filtered, showCategory = 10) + ggtitle("RNA-seq GO Enrichment CC")
+dev.off()
+
+```
+
+```{r}
+go_enrich_ribo_bp_sim <- pairwise_termsim(go_enrich_ribo_bp_filtered)
+go_enrich_ribo_mf_sim <- pairwise_termsim(go_enrich_ribo_mf_filtered)
+go_enrich_ribo_cc_sim <- pairwise_termsim(go_enrich_ribo_cc_filtered)
+go_enrich_rna_bp_sim <- pairwise_termsim(go_enrich_rna_bp_filtered)
+go_enrich_rna_mf_sim <- pairwise_termsim(go_enrich_rna_mf_filtered)
+go_enrich_rna_cc_sim <- pairwise_termsim(go_enrich_rna_cc_filtered)
+
+```
+```{r}
+# Plot the enrichment map for the filtered GO enrichment results
+png("go_enrich_ribo_bp_sim.png", width = 800, height = 600)
+emapplot(go_enrich_ribo_bp_sim, showCategory = 10) + ggtitle("Ribo-seq GO Emapplot BP")
+dev.off()
+png("go_enrich_ribo_mf_sim.png", width = 800, height = 600)
+emapplot(go_enrich_ribo_mf_sim, showCategory = 10) + ggtitle("Ribo-seq GO Emapplot MF")
+dev.off()
+png("go_enrich_ribo_cc_sim.png", width = 800, height = 600)
+emapplot(go_enrich_ribo_cc_sim, showCategory = 10) + ggtitle("Ribo-seq GO Emapplot CC")
+dev.off()
+png("go_enrich_rna_bp_sim.png", width = 800, height = 600)
+emapplot(go_enrich_rna_bp_sim, showCategory = 10) + ggtitle("RNA-seq GO Emapplot BP")
+dev.off()
+png("go_enrich_rna_mf_sim.png", width = 800, height = 600)
+emapplot(go_enrich_rna_mf_sim, showCategory = 10) + ggtitle("RNA-seq GO Emapplot MF")
+dev.off()
+png("go_enrich_rna_cc_sim.png", width = 800, height = 600)
+emapplot(go_enrich_rna_cc_sim, showCategory = 10) + ggtitle("RNA-seq GO Emapplot CC")
+dev.off()
+```
