@@ -1,0 +1,286 @@
+
+
+```{r}
+library("pheatmap")
+library(BiocManager)
+library(tidyverse)
+
+library(DESeq2)  # for differential expression analysis
+
+library(VennDiagram) # for creating Venn diagrams
+
+library(ggplot2) # for data visualization 
+
+library(RColorBrewer) # for color palettes
+
+
+```
+
+
+```{r}
+# Loading rna and ribo count data
+df_ribo <- read.csv('ribo_counts.csv', row.names = 1) 
+df_rna <- read.csv('rna_counts.csv', row.names = 1)
+
+df_meta_ribo <- read.csv('metadata_ribo.csv', row.names = 1)
+df_meta_rna <- read.csv('metadata_rna.csv', row.names = 1)
+
+
+```
+
+```{r}
+# Checking if the row names of the metadata match the column names of the count data
+
+all(rownames(df_meta_ribo) == colnames(df_ribo))
+all(rownames(df_meta_rna) == colnames(df_rna))
+
+```
+
+```{r}
+# creating DESeqDataSet objects  
+dds_ribo <- DESeqDataSetFromMatrix(countData = df_ribo,
+                              colData = df_meta_ribo,
+                              design = ~ condition)
+
+dds_rna <- DESeqDataSetFromMatrix(countData = df_rna,
+                              colData = df_meta_rna,
+                              design = ~ condition)
+
+
+```     
+
+```{r}
+# normalizing the data to account for library size differences
+dds_ribo <- estimateSizeFactors(dds_ribo)
+dds_rna <- estimateSizeFactors(dds_rna)
+
+
+normalized_counts_ribo <- counts(dds_ribo, normalized = TRUE) 
+normalized_counts_rna <- counts(dds_rna, normalized = TRUE)
+
+```
+
+```{r}
+# Checking the normalized counts
+head(normalized_counts_ribo)
+head(normalized_counts_rna)
+
+```
+
+```{r}
+# Save the normalized counts to CSV files
+write.csv(normalized_counts_ribo, 'ribo_normalized_counts.csv')
+write.csv(normalized_counts_rna, 'rna_normalized_counts.csv')
+
+```
+
+```{r}
+# transforming to VST for correlation and PCA
+
+vst_ribo <- vst(dds_ribo, blind = TRUE)
+vst_rna <- vst(dds_rna, blind = TRUE)
+
+
+vst_ribo_df <- as.data.frame(assay(vst_ribo))
+vst_rna_df <- as.data.frame(assay(vst_rna))
+
+# correlation plots to show the relationship between samples
+vst_ribo_corr <- cor(vst_ribo_df)   
+vst_rna_corr <- cor(vst_rna_df)
+
+#save the heatmaps for correlation
+pheatmap(vst_ribo_corr, annotation = select(df_meta_ribo, condition), filename = "ribo_vst_heatmap.png")
+pheatmap(vst_rna_corr, annotation = select(df_meta_rna, condition), filename = "rna_vst_heatmap.png")
+
+```
+
+```{r}
+# PCA to show variance in the data
+
+png ("ribo_pca.png")
+plotPCA(vst_ribo, intgroup = "condition")
+dev.off()
+
+png ("rna_pca.png")
+plotPCA(vst_rna, intgroup = "condition")
+dev.off()
+
+
+
+```
+
+```{r}
+# Differentially expressed genes
+
+dds_ribo <- DESeqDataSetFromMatrix(countData = df_ribo,
+                              colData = df_meta_ribo,
+                              design = ~ condition)
+
+dds_rna <- DESeqDataSetFromMatrix(countData = df_rna,
+                              colData = df_meta_rna,
+                              design = ~ condition)
+
+dds_ribo <- DESeq(dds_ribo)
+dds_rna <- DESeq(dds_rna)
+
+```
+
+```{r}
+# plot dispersions for ribo and rna data to show dispersion estimates
+png ("ribo_dispersion.png")
+plotDispEsts(dds_ribo)
+dev.off()
+
+png ("rna_dispersion.png")
+plotDispEsts(dds_rna)
+dev.off()
+
+
+```
+
+```{r}
+# results for differential expression analysis
+
+res_ribo <- results(dds_ribo, contrast = c("condition", "Aux", "noAux"), alpha = 0.05, lfcThreshold = 0.32)
+res_rna <- results(dds_rna, contrast = c("condition", "Aux", "noAux"), alpha = 0.05, lfcThreshold = 0.32)
+
+
+```
+
+```{r}
+# Shrink log2 fold changes for better visualization
+res_ribo <- lfcShrink(dds_ribo, contrast = c("condition", "Aux", "noAux"), res = res_ribo,  type='ashr') 
+res_rna <- lfcShrink(dds_rna, contrast = c("condition", "Aux", "noAux"), res = res_rna,  type='ashr')
+
+head(res_ribo)
+
+```
+```{r}
+# Save results to CSV
+res_ribo_df <- as.data.frame(res_ribo)
+res_rna_df <- as.data.frame(res_rna)
+#remove na
+res_ribo_df <- res_ribo_df[complete.cases(res_ribo_df), ]
+res_rna_df <- res_rna_df[complete.cases(res_rna_df), ]
+# padj < 0.05
+res_ribo_df <- res_ribo_df[res_ribo_df$padj < 0.05,]
+res_rna_df <- res_rna_df[res_rna_df$padj < 0.05,]
+# Save the results
+write.csv(res_ribo_df, "ribo_de_results.csv")
+write.csv(res_rna_df, "rna_de_results.csv")
+
+```
+
+
+```{r}
+summary(res_ribo)
+summary(res_rna)
+
+```
+
+```{r}
+length(which(res_ribo$padj < 0.05))
+length(which(res_rna$padj < 0.05))
+
+# Get significant genes from ribo and RNA results
+sig_ribo <- rownames(subset(res_ribo, padj < 0.05))
+sig_rna <- rownames(subset(res_rna, padj < 0.05))
+
+# Find overlap
+overlap_genes <- intersect(sig_ribo, sig_rna)
+
+# Count the number of overlapping genes
+length(overlap_genes)
+
+
+
+
+# Create a Venn diagram and save as PNG
+venn.diagram(
+  x = list(sig_ribo, sig_rna),
+  category.names = c("Ribo DEGs", "RNA DEGs"),
+  filename = "venn_diagram.png",  # Save as PNG
+  imagetype = "png",              # Specify image type
+  output = TRUE
+)
+```
+
+```{r}
+# creating MA plot to show the relationship between log2 fold change and mean of normalized counts
+png ("ribo_MA.png")
+plotMA(res_ribo, main = "MA plot for ribo differential expression", ylim = c(-2, 2))
+dev.off()
+
+png("rna_MA.png")
+plotMA(res_rna, main = "MA plot for rna differential expression", ylim = c(-2, 2))
+dev.off()
+```
+
+
+```{r}
+# selecting the genes with padj < 0.05
+df_selected_ribo <- df_ribo[res_ribo$padj < 0.05, ] 
+df_selected_rna <- df_rna[res_rna$padj < 0.05, ]
+
+# remove na
+df_selected_ribo <- df_selected_ribo[complete.cases(df_selected_ribo), ]
+df_selected_rna <- df_selected_rna[complete.cases(df_selected_rna), ]
+
+# Save the significant genes to CSV
+write.csv( df_selected_ribo, "selected_ribo.csv")
+write.csv( df_selected_rna, "selected_rna.csv")
+
+
+```
+
+
+```{r}
+# Volcano plot  
+res_ribo_na = res_ribo[complete.cases(res_ribo),]
+res_rna_na = res_rna[complete.cases(res_rna),]
+
+png ("ribo_volcano.png")
+ggplot(data = res_ribo_na, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = padj < 0.05), alpha = 0.6) +
+  scale_color_manual(values = c("grey", "red")) +
+  theme_minimal() +
+  labs(title = "Volcano plot for ribo differential expression",
+       x = "log2 fold change",
+       y = "-log10 adjusted p-value")
+dev.off()
+
+png ("rna_volcano.png")
+ggplot(data = res_rna_na, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = padj < 0.05), alpha = 0.6) +
+  scale_color_manual(values = c("grey", "red")) +
+  theme_minimal() +
+  labs(title = "Volcano plot for rna differential expression",
+       x = "log2 fold change",
+       y = "-log10 adjusted p-value")
+dev.off()
+```
+```{r}
+head(normalized_counts_ribo)
+```
+
+```{r}
+
+# HEATMAP
+
+# Subset normalized counts to significant genes
+sig_ribo_counts <- normalized_counts_ribo[sig_ribo, ]
+sig_rna_counts <- normalized_counts_rna[sig_rna, ]
+
+heat_colors <- brewer.pal(n = 6, name = "RdYlBu")
+
+# Create heatmap for ribo
+png("ribo_heatmap_expression.png")
+pheatmap(sig_ribo_counts, color = heat_colors, annotation = select(df_meta_ribo, condition), cluster_rows = TRUE, show_rownames = FALSE, scale = "row")
+dev.off()
+
+# Create heatmap for rna
+png("rna_heatmap_expression.png")
+pheatmap(sig_rna_counts, color = heat_colors, annotation = select(df_meta_rna, condition), cluster_rows = TRUE, show_rownames = FALSE, scale = "row")
+dev.off()
+
+```
